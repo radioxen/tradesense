@@ -1,0 +1,138 @@
+# =============================================================================
+# TASK CONFIGURATIONS - TradeSense AI Trading System
+# =============================================================================
+# This file defines all tasks that agents execute during the trading workflow.
+# Tasks are executed in sequence: scan -> analyze -> decide -> execute
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# TASK 1: MARKET SCAN
+# -----------------------------------------------------------------------------
+scan_market:
+  description: >
+    Scan the market to identify stocks with high momentum potential.
+    Focus on pre-market movers, unusual volume, and technical momentum.
+    Filter for stocks with:
+    - Price between $5-$500
+    - Average volume > 1M shares
+    - RSI not overbought (< 70)
+    - Positive MACD histogram
+  expected_output: >
+    A list of 5-10 stock symbols with momentum scores, current prices,
+    RSI values, and brief reasoning for each selection.
+  agent: scanner
+  context: []
+
+# -----------------------------------------------------------------------------
+# TASK 2: TECHNICAL ANALYSIS
+# -----------------------------------------------------------------------------
+analyze_technicals:
+  description: >
+    For each stock from the scan, perform deep technical analysis:
+    1. Calculate RSI, MACD, ADX, Bollinger Bands
+    2. Identify support/resistance levels
+    3. Detect chart patterns
+    4. Generate probability forecast using ML models
+    5. Determine entry/exit points
+  expected_output: >
+    Technical signal with:
+    - Direction (BULLISH/BEARISH/NEUTRAL)
+    - Confidence score (0-100%)
+    - Forecast return with confidence intervals
+    - Top contributing features
+    - Recommended entry price
+  agent: technical
+  context:
+    - scan_market
+
+# -----------------------------------------------------------------------------
+# TASK 3: FUNDAMENTAL ANALYSIS
+# -----------------------------------------------------------------------------
+analyze_fundamentals:
+  description: >
+    For each stock, search for recent news and upcoming catalysts:
+    1. Query Perplexity AI for latest news (earnings, M&A, guidance)
+    2. Identify upcoming events (earnings dates, FDA approvals, etc.)
+    3. Analyze sentiment from multiple sources
+    4. Rate credibility of each source
+    5. Flag any red flags or risks
+  expected_output: >
+    Fundamental signal with:
+    - Sentiment score (-1 to +1)
+    - Key catalysts list
+    - Risks identified
+    - News count analyzed
+    - Citations with credibility scores
+  agent: fundamental
+  context:
+    - scan_market
+
+# -----------------------------------------------------------------------------
+# TASK 4: EXECUTIVE DECISION
+# -----------------------------------------------------------------------------
+make_decision:
+  description: >
+    Synthesize technical and fundamental analysis to make final decision:
+    1. Review all analyst signals for agreement/conflict
+    2. Calculate combined confidence score
+    3. Determine action: BUY, SELL, or HOLD
+    4. If BUY/SELL, calculate position size based on confidence and risk
+    5. Set stop-loss (typically 2-3% based on ATR)
+    6. Set take-profit (typically 2x stop-loss for 2:1 reward/risk)
+    7. Document rationale for audit trail
+  expected_output: >
+    Executive decision with:
+    - Action (BUY/SELL/HOLD)
+    - Position size (shares and % of portfolio)
+    - Entry price (market or limit)
+    - Stop-loss price and percentage
+    - Take-profit price and percentage
+    - Detailed rationale
+    - What would change your mind
+  agent: executive
+  context:
+    - analyze_technicals
+    - analyze_fundamentals
+
+# -----------------------------------------------------------------------------
+# TASK 5: RISK CHECK
+# -----------------------------------------------------------------------------
+check_risk:
+  description: >
+    Before executing any trade, verify risk parameters:
+    1. Check if position size exceeds 15% of portfolio
+    2. Verify total exposure doesn't exceed 80% of portfolio
+    3. Check for correlated positions (same sector, similar stocks)
+    4. Validate stop-loss is set and reasonable
+    5. Approve or reject the trade
+  expected_output: >
+    Risk assessment with:
+    - Approval status (APPROVED/REJECTED)
+    - Current portfolio exposure
+    - Sector concentration
+    - Any warnings or adjustments required
+  agent: risk_guardian
+  context:
+    - make_decision
+
+# -----------------------------------------------------------------------------
+# TASK 6: EXECUTE TRADE
+# -----------------------------------------------------------------------------
+execute_trade:
+  description: >
+    Execute approved trades via the broker API:
+    1. Submit market or limit order
+    2. Set stop-loss order
+    3. Set take-profit order
+    4. Log execution details
+    5. Update portfolio tracking
+  expected_output: >
+    Execution confirmation with:
+    - Order ID
+    - Fill price
+    - Quantity executed
+    - Commission/fees
+    - Timestamp
+  agent: executive
+  context:
+    - check_risk

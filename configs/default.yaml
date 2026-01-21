@@ -1,0 +1,181 @@
+# AI Trading System Configuration
+# Default configuration for local development
+
+app:
+  name: "ai-trading-system"
+  version: "0.1.0"
+  env: "development"
+  log_level: "INFO"
+
+# Symbols and universe
+universe:
+  default_symbols:
+    - "AAPL"
+    - "GOOGL"
+    - "MSFT"
+    - "NVDA"
+    - "TSLA"
+  asset_class: "stocks" # stocks, crypto, forex
+
+# Time configuration
+time:
+  timezone: "America/New_York"
+  trading_hours:
+    start: "09:30"
+    end: "16:00"
+  intervals:
+    - "1m"
+    - "5m"
+    - "15m"
+    - "1h"
+    - "1d"
+  default_interval: "1h"
+
+# Data providers
+data:
+  market_data:
+    provider: "yfinance" # yfinance, alpaca
+    cache_dir: "./data/market"
+
+  news_data:
+    provider: "perplexity"
+    enable_live_search: false # Use offline cache for backtests
+    cache_dir: "./data/news"
+
+# Database connections
+database:
+  timescaledb:
+    host: "localhost"
+    port: 5432
+    database: "trading_market"
+    user: "trading"
+    password: "${TIMESCALE_PASSWORD}"
+
+  postgres:
+    host: "localhost"
+    port: 5433
+    database: "trading_ledger"
+    user: "trading"
+    password: "${POSTGRES_PASSWORD}"
+
+# Feature engineering
+features:
+  lookback_periods:
+    short: 5
+    medium: 20
+    long: 60
+
+  technical_indicators:
+    - rsi
+    - macd
+    - bollinger
+    - atr
+    - adx
+    - obv
+    - vwap
+
+# Agent configuration
+agents:
+  llm:
+    provider: "openai"
+    model: "gpt-4-turbo-preview"
+    temperature: 0.1
+    max_tokens: 2000
+
+  technical:
+    model_ensemble:
+      - xgboost
+      - lightgbm
+      - lstm
+    retrain_frequency: "weekly"
+
+  fundamental:
+    perplexity_model: "sonar-pro"
+    max_news_items: 10
+    credibility_threshold: 0.6
+
+  hybrid:
+    conflict_resolution: "weighted_average"
+    scenario_count: 3
+
+  executive:
+    min_confidence: 0.6
+    require_unanimous: false
+
+  risk_guardian:
+    max_position_pct: 0.20
+    max_daily_loss_pct: 0.05
+    max_trades_per_day: 10
+    min_confidence: 0.5
+
+# RL configuration
+rl:
+  execution:
+    algorithm: "PPO"
+    learning_rate: 0.0003
+    batch_size: 64
+    n_steps: 2048
+
+  sizing:
+    algorithm: "CQL" # Conservative Q-Learning (offline)
+    learning_rate: 0.0001
+    batch_size: 256
+
+  training:
+    episodes: 10000
+    eval_frequency: 100
+    checkpoint_frequency: 500
+
+# Backtesting
+backtest:
+  initial_capital: 100000.0
+  commission:
+    type: "per_share"
+    value: 0.005
+  slippage:
+    type: "bps"
+    value: 5
+  margin: 1.0 # No margin initially
+
+# Execution
+execution:
+  mode: "paper" # backtest, paper, live_hil, live_auto
+  broker: "alpaca"
+
+  alpaca:
+    api_key: "${ALPACA_API_KEY}"
+    api_secret: "${ALPACA_API_SECRET}"
+    base_url: "https://paper-api.alpaca.markets" # Paper trading
+
+# Human-in-the-loop
+hil:
+  enabled: true
+  notification_channels:
+    - type: "slack"
+      webhook: "${SLACK_WEBHOOK_URL}"
+    - type: "telegram"
+      bot_token: "${TELEGRAM_BOT_TOKEN}"
+      chat_id: "${TELEGRAM_CHAT_ID}"
+  approval_timeout_seconds: 300 # 5 minutes
+  auto_approve_below_size: 1000 # USD
+
+# Artifacts and logging
+artifacts:
+  base_dir: "./artifacts"
+  save_agent_transcripts: true
+  save_model_predictions: true
+  save_feature_importance: true
+
+# MLflow tracking
+mlflow:
+  tracking_uri: "http://localhost:5000"
+  experiment_name: "ai-trading-system"
+
+# Monitoring
+monitoring:
+  prometheus:
+    enabled: true
+    port: 9090
+  grafana:
+    enabled: true
+    port: 3000
