@@ -259,12 +259,34 @@ class TechnicalAnalystAgent(ModelAgent[TechnicalSignal]):
             # Calculate confidence
             confidence = self._calculate_confidence(prediction, features)
 
-        # Adjust confidence based on Evolution Strategy backtest
+        # Adjust confidence based on Evolution Strategy backtest performance
         if evolution_result is not None:
-            if evolution_result.investment_return > 5:
-                confidence = min(confidence + 0.08, 0.95)
-            elif evolution_result.investment_return < -5:
-                confidence = max(confidence - 0.10, 0.25)
+            backtest_return = evolution_result.investment_return
+            
+            if backtest_return > 10:
+                # Strong positive backtest - boost confidence
+                confidence = min(confidence + 0.12, 0.92)
+            elif backtest_return > 5:
+                confidence = min(confidence + 0.06, 0.88)
+            elif backtest_return < -30:
+                # Very poor backtest - ignore Evolution Strategy, use rule-based
+                logger.warning(
+                    f"Evolution Strategy backtest shows {backtest_return:.1f}% loss, "
+                    f"falling back to rule-based signal"
+                )
+                if forecast_q50 > threshold / 2:
+                    direction = Direction.LONG
+                elif forecast_q50 < -threshold / 2:
+                    direction = Direction.SHORT
+                else:
+                    direction = Direction.NEUTRAL
+                confidence = self._calculate_confidence(prediction, features)
+                confidence = max(confidence - 0.15, 0.25)
+            elif backtest_return < -10:
+                # Poor backtest - significantly reduce confidence
+                confidence = max(confidence - 0.20, 0.25)
+            elif backtest_return < -5:
+                confidence = max(confidence - 0.12, 0.30)
 
         # Detect regime
         regime = self._detect_regime(features)

@@ -211,25 +211,28 @@ class EvolutionStrategyAgent:
         State is the vector of price differences over the window.
         This captures momentum and trend information.
         
+        Based on tradioxen implementation.
+        
         Args:
             t: Current time index
             
         Returns:
             State vector of shape (1, window_size)
         """
-        d = t - self.window_size + 1
+        # Need window_size + 1 elements to get window_size differences
+        window_size = self.window_size + 1
+        d = t - window_size + 1
+        
         if d >= 0:
             block = self.trend[d : t + 1]
         else:
             # Pad with first value if not enough history
-            block = np.concatenate([
-                np.full(-d, self.trend[0]),
-                self.trend[0 : t + 1]
-            ])
+            padding = np.full(-d, self.trend[0])
+            block = np.concatenate([padding, self.trend[0 : t + 1]])
         
-        # Compute price differences
+        # Compute price differences (window_size - 1 = self.window_size differences)
         res = []
-        for i in range(len(block) - 1):
+        for i in range(window_size - 1):
             res.append(block[i + 1] - block[i])
         
         return np.array([res])
@@ -405,7 +408,7 @@ class EvolutionStrategyAgent:
         """Get trading signal for the current moment.
         
         Args:
-            recent_prices: Recent price history (at least window_size prices)
+            recent_prices: Recent price history (at least window_size + 1 prices)
             
         Returns:
             Tuple of (signal, confidence) where signal is "BUY", "SELL", or "HOLD"
@@ -413,14 +416,21 @@ class EvolutionStrategyAgent:
         if not self.is_trained:
             raise ValueError("Agent must be trained before getting signals")
         
-        if len(recent_prices) < self.window_size:
+        # Need window_size + 1 prices to compute window_size differences
+        if len(recent_prices) < self.window_size + 1:
             return "HOLD", 0.0
         
-        self.trend = np.array(recent_prices[-self.window_size - 1:], dtype=np.float64)
-        state = self._get_state(len(self.trend) - 1)
+        # Take exactly window_size + 1 most recent prices
+        prices = np.array(recent_prices[-(self.window_size + 1):], dtype=np.float64)
+        
+        # Compute price differences directly (window_size differences)
+        state = np.diff(prices).reshape(1, -1)
         
         decision = self.model.predict(state)
-        probabilities = np.exp(decision[0]) / np.sum(np.exp(decision[0]))  # Softmax
+        
+        # Softmax for probabilities
+        exp_decision = np.exp(decision[0] - np.max(decision[0]))  # Subtract max for numerical stability
+        probabilities = exp_decision / np.sum(exp_decision)
         
         action = np.argmax(probabilities)
         confidence = float(probabilities[action])
