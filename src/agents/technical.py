@@ -72,9 +72,10 @@ class TechnicalAnalystAgent(ModelAgent[TechnicalSignal]):
         model_dir: Path | None = None,
         threshold_pct: float = 0.5,
         config: dict[str, Any] | None = None,
-        use_evolution_strategy: bool = True,
+        use_evolution_strategy: bool = False,  # Disabled by default - use when market is stable
         evolution_window: int = 30,
-        evolution_epochs: int = 200,
+        evolution_epochs: int = 500,
+        evolution_min_backtest: float = -10.0,  # Min backtest return to trust Evolution Strategy
     ):
         """Initialize Technical Analyst.
 
@@ -83,8 +84,11 @@ class TechnicalAnalystAgent(ModelAgent[TechnicalSignal]):
             threshold_pct: Threshold for p_up/p_down calculations.
             config: Additional configuration.
             use_evolution_strategy: Whether to use Evolution Strategy signals.
+                Disabled by default as it requires stable market conditions.
+                Enable when you have 200+ days of data and moderate volatility.
             evolution_window: Window size for Evolution Strategy state.
-            evolution_epochs: Training epochs for Evolution Strategy.
+            evolution_epochs: Training epochs for Evolution Strategy (500+ recommended).
+            evolution_min_backtest: Minimum backtest return to trust the Evolution Strategy.
         """
         super().__init__(
             name="technical_analyst",
@@ -94,17 +98,23 @@ class TechnicalAnalystAgent(ModelAgent[TechnicalSignal]):
         self.model_dir = model_dir
         self.threshold_pct = threshold_pct
         self._models: dict[str, Any] = {}
-        self._model_version = "v0.1.0"
-        self._data_version = "features_v1"
+        self._model_version = "v1.1.0"  # Updated version with multi-factor signals
+        self._data_version = "features_v2"
         
         # Evolution Strategy settings
         self.use_evolution_strategy = use_evolution_strategy and HAS_EVOLUTION_STRATEGY
         self.evolution_window = evolution_window
         self.evolution_epochs = evolution_epochs
+        self.evolution_min_backtest = evolution_min_backtest
         self._evolution_agents: dict[str, EvolutionStrategyAgent] = {}
         
         if self.use_evolution_strategy:
-            logger.info("Evolution Strategy enabled for technical analysis")
+            logger.info(
+                f"Evolution Strategy enabled: window={evolution_window}, "
+                f"epochs={evolution_epochs}, min_backtest={evolution_min_backtest}%"
+            )
+        else:
+            logger.info("Using enhanced rule-based technical analysis (Evolution Strategy disabled)")
 
     @property
     def description(self) -> str:
@@ -657,7 +667,7 @@ class TechnicalAnalystAgent(ModelAgent[TechnicalSignal]):
         
         Args:
             symbol: Stock symbol
-            prices: Array of closing prices (at least 60 days)
+            prices: Array of closing prices (at least 60 days, ideally 200+)
             
         Returns:
             Tuple of (signal, confidence, backtest_result)
@@ -672,15 +682,28 @@ class TechnicalAnalystAgent(ModelAgent[TechnicalSignal]):
         try:
             # Check if we have a cached agent for this symbol
             if symbol not in self._evolution_agents:
-                logger.info(f"Training Evolution Strategy agent for {symbol}")
+                # Determine train/test split based on data available
+                # Use 85% for training, 15% for validation (min 30 days)
+                test_days = max(30, int(len(prices) * 0.15))
+                train_prices = prices[:-test_days]
+                
+                logger.info(
+                    f"Training Evolution Strategy for {symbol}: "
+                    f"{len(train_prices)} train days, {test_days} test days, "
+                    f"{self.evolution_epochs} epochs"
+                )
+                
                 agent = EvolutionStrategyAgent(
                     window_size=self.evolution_window,
                     initial_money=10000.0,
                 )
                 
-                # Train on earlier data
-                train_prices = prices[:-30]  # Reserve last 30 for validation
-                agent.fit(train_prices, epochs=self.evolution_epochs, print_every=50)
+                # Train with progress updates
+                agent.fit(
+                    train_prices, 
+                    epochs=self.evolution_epochs, 
+                    print_every=max(self.evolution_epochs // 10, 50)
+                )
                 
                 self._evolution_agents[symbol] = agent
             
@@ -689,18 +712,22 @@ class TechnicalAnalystAgent(ModelAgent[TechnicalSignal]):
             # Get current signal
             signal, confidence = agent.get_current_signal(prices)
             
-            # Get backtest results on recent data
-            result = agent.predict(prices[-30:])
+            # Get backtest results on recent data (last 30 days or 15% whichever is larger)
+            test_days = max(30, int(len(prices) * 0.15))
+            result = agent.predict(prices[-test_days:])
             
             logger.info(
                 f"Evolution Strategy {symbol}: {signal} "
-                f"(conf={confidence:.2f}, backtest_return={result.investment_return:.2f}%)"
+                f"(conf={confidence:.2f}, backtest_return={result.investment_return:.2f}%, "
+                f"trades={len(result.trades)})"
             )
             
             return signal, confidence, result
             
         except Exception as e:
             logger.error(f"Evolution Strategy error for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
             return "HOLD", 0.5, None
 
     def get_combined_signal(
