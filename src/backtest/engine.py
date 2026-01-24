@@ -506,16 +506,12 @@ class BacktestEngine:
         drawdown = (rolling_max - equity_df["equity"]) / rolling_max
         max_drawdown = drawdown.max()
 
-        # Win rate
-        if self.trades:
-            # Group trades into round trips would be more accurate
-            # For now, simple P&L per trade
-            winning_trades = sum(1 for t in self.trades if t.side == "SELL")
-            num_trades = len(self.trades)
-            win_rate = winning_trades / num_trades if num_trades > 0 else 0.0
-        else:
-            win_rate = 0.0
-            num_trades = 0
+        # Win rate (based on closed trades)
+        trade_pnls = self._calculate_trade_pnls()
+        closed_trades = len(trade_pnls)
+        winning_trades = sum(1 for pnl in trade_pnls if pnl > 0)
+        win_rate = winning_trades / closed_trades if closed_trades > 0 else 0.0
+        num_trades = len(self.trades)
 
         # CAGR
         if len(equity_df) > 1:
@@ -535,6 +531,32 @@ class BacktestEngine:
             "sharpe_ratio": sharpe,
             "max_drawdown": max_drawdown,
             "total_trades": num_trades,
+            "closed_trades": closed_trades,
             "win_rate": win_rate,
             "total_commission": sum(t.commission for t in self.trades),
         }
+
+    def _calculate_trade_pnls(self) -> list[float]:
+        """Calculate realized P&L per closed trade."""
+        trade_pnls: list[float] = []
+        positions: dict[str, dict[str, float]] = {}
+
+        for trade in self.trades:
+            pos = positions.get(trade.symbol, {"qty": 0.0, "avg_cost": 0.0})
+
+            if trade.side == "BUY":
+                total_cost = pos["avg_cost"] * pos["qty"] + trade.quantity * trade.price
+                pos["qty"] += trade.quantity
+                pos["avg_cost"] = total_cost / pos["qty"] if pos["qty"] > 0 else 0.0
+            else:
+                sell_qty = min(trade.quantity, pos["qty"])
+                if sell_qty > 0:
+                    realized = (trade.price - pos["avg_cost"]) * sell_qty - trade.commission
+                    trade_pnls.append(realized)
+                    pos["qty"] -= sell_qty
+                    if pos["qty"] <= 0:
+                        pos = {"qty": 0.0, "avg_cost": 0.0}
+
+            positions[trade.symbol] = pos
+
+        return trade_pnls

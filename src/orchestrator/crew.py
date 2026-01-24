@@ -211,20 +211,26 @@ class SimpleOrchestrator:
         self,
         min_confidence: float = 0.5,
         max_position_pct: float = 0.15,
+        technical_agent: TechnicalAnalystAgent | None = None,
+        executive_agent: ExecutiveAgent | None = None,
+        risk_guardian: RiskGuardian | None = None,
     ):
         """Initialize simple orchestrator.
 
         Args:
             min_confidence: Minimum confidence to trade.
             max_position_pct: Maximum position size.
+            technical_agent: Optional pre-configured technical agent.
+            executive_agent: Optional pre-configured executive agent.
+            risk_guardian: Optional pre-configured risk guardian.
         """
-        self.technical = TechnicalAnalystAgent()
-        self.executive = ExecutiveAgent(
+        self.technical = technical_agent or TechnicalAnalystAgent()
+        self.executive = executive_agent or ExecutiveAgent(
             use_llm=False,
             min_confidence=min_confidence,
             max_position_pct=max_position_pct,
         )
-        self.risk_guardian = RiskGuardian(
+        self.risk_guardian = risk_guardian or RiskGuardian(
             max_position_pct=max_position_pct,
         )
 

@@ -163,6 +163,10 @@ Stock Trading/
 - [x] Real-time agent thinking display
 - [x] Holdings view with charts
 
+### Phase 5: Backtesting Enhancements
+- [x] Historical backtesting flow (60/30 train-test split) via CLI
+- [x] Win-rate calculation based on closed-trade P&L
+
 ---
 
 ## Agent Status
@@ -357,6 +361,12 @@ cd webapp && npm run dev
 # Access UI at http://localhost:3000
 ```
 
+### Historical Backtest (60/30 Split)
+
+```bash
+python -m src.cli run-historical-backtest --symbol TSLA --interval 1h --train-days 60 --test-days 30
+```
+
 ---
 
 ## Known Issues
@@ -384,17 +394,11 @@ cd webapp && npm run dev
 ## Pending Tasks
 
 ### High Priority
-1. **Historical Backtesting Flow**
-   - Collect 90 days of data
-   - Train on 60 days, test on 30 days
-   - Simulate trading from day 61
-   - Report success rate and capital gain
-
-2. **Improve Confidence Scores**
+1. **Improve Confidence Scores**
    - Current scores are conservative (correct but low)
    - Consider adjusting thresholds for production
 
-3. **Trade Execution**
+2. **Trade Execution**
    - Connect Executive decisions to Alpaca orders
    - Implement order management
 

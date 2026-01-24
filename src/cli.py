@@ -190,6 +190,210 @@ def run_backtest(
 
 
 @app.command()
+def run_historical_backtest(
+    symbol: str = typer.Option(
+        "AAPL",
+        "--symbol", "-s",
+        help="Trading symbol",
+    ),
+    interval: str = typer.Option(
+        "1h",
+        "--interval", "-i",
+        help="Bar interval (1m, 5m, 15m, 1h, 1d)",
+    ),
+    train_days: int = typer.Option(
+        60,
+        "--train-days",
+        help="Number of days to use for training",
+    ),
+    test_days: int = typer.Option(
+        30,
+        "--test-days",
+        help="Number of days to use for testing",
+    ),
+    end_date: str = typer.Option(
+        None,
+        "--end",
+        help="End date (YYYY-MM-DD), defaults to today",
+    ),
+    model_dir: str = typer.Option(
+        "./models/technical",
+        "--model-dir",
+        help="Directory for technical models",
+    ),
+    save_models: bool = typer.Option(
+        True,
+        "--save-models/--no-save-models",
+        help="Save trained models to disk",
+    ),
+    skip_train: bool = typer.Option(
+        False,
+        "--skip-train",
+        help="Skip training and use any existing models on disk",
+    ),
+    min_confidence: float = typer.Option(
+        0.5,
+        "--min-confidence",
+        help="Minimum confidence to trade",
+    ),
+    max_position_pct: float = typer.Option(
+        0.15,
+        "--max-position-pct",
+        help="Maximum position size as fraction of equity",
+    ),
+    initial_capital: float = typer.Option(
+        100_000.0,
+        "--initial-capital",
+        help="Initial capital for backtest",
+    ),
+    slippage_bps: float = typer.Option(
+        5.0,
+        "--slippage-bps",
+        help="Slippage in basis points",
+    ),
+    output_dir: str = typer.Option(
+        None,
+        "--output", "-o",
+        help="Output directory for results",
+    ),
+):
+    """Run the 60/30 historical backtesting flow."""
+    setup_logging(level="INFO")
+    logger = get_logger("cli")
+
+    console.print(Panel.fit(
+        "[bold blue]AI Trading System - Historical Backtest[/bold blue]",
+        border_style="blue",
+    ))
+
+    if end_date is None:
+        end = datetime.now()
+    else:
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+
+    start = end - timedelta(days=train_days + test_days)
+    split_date = start + timedelta(days=train_days)
+
+    console.print(f"Symbol: [bold]{symbol}[/bold]")
+    console.print(f"Interval: {interval}")
+    console.print(f"Train/Test: {train_days}d / {test_days}d")
+    console.print(f"Period: {start.date()} to {end.date()}")
+    console.print(f"Split date: {split_date.date()}")
+
+    async def _run():
+        import pandas as pd
+
+        from src.agents.executive import ExecutiveAgent
+        from src.agents.risk_guardian import RiskGuardian
+        from src.agents.technical import TechnicalAnalystAgent
+        from src.backtest.engine import BacktestConfig, BacktestEngine
+        from src.data.feature_store import FeatureBuilder
+        from src.data.market_data import get_provider
+        from src.orchestrator.crew import SimpleOrchestrator
+        from src.orchestrator.contracts import PipelineState
+
+        provider = get_provider("yfinance")
+        data = await provider.fetch_ohlcv(symbol, start, end, interval)
+
+        if data.empty:
+            console.print("[red]No data returned[/red]")
+            return
+
+        data["timestamp"] = pd.to_datetime(data["timestamp"])
+        data = data.sort_values("timestamp").reset_index(drop=True)
+
+        feature_builder = FeatureBuilder()
+        features_df = feature_builder.build_features(data)
+        features_df["timestamp"] = pd.to_datetime(features_df["timestamp"])
+        features_df = features_df.sort_values("timestamp").reset_index(drop=True)
+
+        train_mask = features_df["timestamp"] < split_date
+        train_features = features_df[train_mask].reset_index(drop=True)
+        test_features = features_df[~train_mask].reset_index(drop=True)
+        test_data = data[~train_mask].reset_index(drop=True)
+
+        if train_features.empty or test_data.empty:
+            console.print("[red]Insufficient data after train/test split[/red]")
+            return
+
+        console.print(f"Train bars: [bold]{len(train_features)}[/bold]")
+        console.print(f"Test bars: [bold]{len(test_data)}[/bold]")
+
+        model_path = Path(model_dir) if model_dir else None
+        technical_agent = TechnicalAnalystAgent(model_dir=model_path)
+
+        if skip_train:
+            await technical_agent.load_model()
+            console.print("[yellow]Skipped training, loaded models from disk[/yellow]")
+        else:
+            console.print("[cyan]Training technical models...[/cyan]")
+            train_metrics = await technical_agent.train_models(
+                train_features,
+                save_models=save_models,
+            )
+            if train_metrics.get("models_trained"):
+                console.print(f"[green]Trained models: {', '.join(train_metrics['models_trained'])}[/green]")
+            else:
+                console.print("[yellow]No models trained, using rule-based signals[/yellow]")
+
+        executive_agent = ExecutiveAgent(
+            use_llm=False,
+            min_confidence=min_confidence,
+            max_position_pct=max_position_pct,
+        )
+        risk_guardian = RiskGuardian(
+            max_position_pct=max_position_pct,
+            min_confidence=min_confidence,
+        )
+        orchestrator = SimpleOrchestrator(
+            min_confidence=min_confidence,
+            max_position_pct=max_position_pct,
+            technical_agent=technical_agent,
+            executive_agent=executive_agent,
+            risk_guardian=risk_guardian,
+        )
+
+        async def decision_callback(state: PipelineState):
+            return await orchestrator.run(state)
+
+        backtest_config = BacktestConfig(
+            initial_capital=initial_capital,
+            slippage_bps=slippage_bps,
+            max_position_pct=max_position_pct,
+        )
+        engine = BacktestEngine(backtest_config, decision_callback)
+        results = await engine.run(symbol, test_data, test_features)
+
+        metrics = results["metrics"]
+        capital_gain = metrics["final_equity"] - metrics["initial_capital"]
+
+        table = Table(title="Historical Backtest Results")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Total Return", f"{metrics['total_return']:.2%}")
+        table.add_row("Capital Gain", f"${capital_gain:,.2f}")
+        table.add_row("Success Rate", f"{metrics['win_rate']:.2%}")
+        table.add_row("Closed Trades", str(metrics["closed_trades"]))
+        table.add_row("Total Trades", str(metrics["total_trades"]))
+        table.add_row("Max Drawdown", f"{metrics['max_drawdown']:.2%}")
+        table.add_row("Sharpe Ratio", f"{metrics['sharpe_ratio']:.2f}")
+        table.add_row("Final Equity", f"${metrics['final_equity']:,.2f}")
+
+        console.print(table)
+
+        if output_dir:
+            out_path = Path(output_dir)
+            out_path.mkdir(parents=True, exist_ok=True)
+
+            results["equity_curve"].to_parquet(out_path / "equity_curve.parquet")
+            pd.DataFrame(results["decisions"]).to_parquet(out_path / "decisions.parquet")
+
+            console.print(f"\nResults saved to: {out_path}")
+
+    asyncio.run(_run())
+
+
+@app.command()
 def run_paper(
     config: str = typer.Option(
         "configs/default.yaml",
