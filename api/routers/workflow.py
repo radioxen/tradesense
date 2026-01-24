@@ -211,7 +211,7 @@ async def run_crewai_workflow(
     global active_workflow, workflow_cancelled
     workflow_cancelled = False
     
-    from src.orchestrator.crewai_crew import TradingCrew
+    from src.orchestrator.crewai_crew import TradingCrew, parse_crew_decisions
     
     try:
         active_workflow["status"] = "running"
@@ -370,32 +370,51 @@ async def run_crewai_workflow(
             f"LLM output: {crew_output[:500]}..." if len(crew_output) > 500 else f"LLM output: {crew_output}"
         )
         
-        # Parse crew output for decisions (simplified parsing)
+        # Parse crew output for decisions (prefer JSON, fallback to heuristic)
         decisions = []
+        parsed_decisions = parse_crew_decisions(crew_output)
+        parsed_map = {d["symbol"].upper(): d for d in parsed_decisions if d.get("symbol")}
+
         for symbol in symbols:
-            # Look for BUY/SELL signals in crew output
             symbol_upper = symbol.upper()
-            if f"BUY {symbol_upper}" in crew_output.upper() or f"{symbol_upper}: BUY" in crew_output.upper():
-                action = "BUY"
-                confidence = 75
-            elif f"SELL {symbol_upper}" in crew_output.upper() or f"{symbol_upper}: SELL" in crew_output.upper():
-                action = "SELL"
-                confidence = 70
+            parsed = parsed_map.get(symbol_upper)
+
+            if parsed:
+                action = parsed.get("action", "HOLD")
+                confidence = int(round((parsed.get("confidence") or 0.5) * 100))
+                price = parsed.get("entry") or next((r.price for r in scan_results if r.symbol == symbol), 100)
+                quantity = parsed.get("quantity") or 0
+                if action == "BUY" and quantity <= 0 and price:
+                    quantity = int((budget * 0.15) / price)
+                reasoning = parsed.get("rationale") or "CrewAI parsed decision"
+                stop_loss = parsed.get("stop_loss")
+                target = parsed.get("target")
             else:
-                action = "HOLD"
-                confidence = 50
-            
-            # Get price from scan results
-            price = next((r.price for r in scan_results if r.symbol == symbol), 100)
-            quantity = int((budget * 0.15) / price) if action == "BUY" else 0
-            
+                if f"BUY {symbol_upper}" in crew_output.upper() or f"{symbol_upper}: BUY" in crew_output.upper():
+                    action = "BUY"
+                    confidence = 75
+                elif f"SELL {symbol_upper}" in crew_output.upper() or f"{symbol_upper}: SELL" in crew_output.upper():
+                    action = "SELL"
+                    confidence = 70
+                else:
+                    action = "HOLD"
+                    confidence = 50
+
+                price = next((r.price for r in scan_results if r.symbol == symbol), 100)
+                quantity = int((budget * 0.15) / price) if action == "BUY" else 0
+                reasoning = "CrewAI LLM decision based on technical, fundamental, and risk analysis"
+                stop_loss = None
+                target = None
+
             decision = {
                 "symbol": symbol,
                 "action": action,
                 "quantity": quantity,
                 "price": price,
                 "confidence": confidence,
-                "reasoning": f"CrewAI LLM decision based on technical, fundamental, and risk analysis",
+                "reasoning": reasoning,
+                "stop_loss": stop_loss,
+                "target": target,
             }
             decisions.append(decision)
             active_workflow["decisions"].append(decision)

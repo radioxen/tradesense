@@ -147,6 +147,7 @@ Stock Trading/
 - [x] Pipeline orchestrator (`src/orchestrator/crew.py`)
 - [x] CrewAI integration (`src/orchestrator/crewai_crew.py`)
 - [x] Agent configuration via YAML
+- [x] CrewAI decision output structured JSON + parser in workflow
 
 ### Phase 3: Technical Analyst Enhancement (CURRENT)
 - [x] Multi-factor signal aggregation (8 components)

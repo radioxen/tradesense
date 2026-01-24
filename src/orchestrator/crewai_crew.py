@@ -6,6 +6,7 @@ Enhanced with Evolution Strategy from tradioxen for technical analysis.
 """
 
 import os
+import re
 from datetime import datetime, timedelta
 from typing import Any, Callable, Optional, List
 import json
@@ -540,21 +541,30 @@ class TradingCrew:
             Synthesize technical, fundamental, and risk assessments to:
             1. Decide BUY, SELL, or HOLD for each stock
             2. Specify exact order parameters (symbol, action, quantity, price limits)
-            3. Provide confidence score (0-100%)
+            3. Provide confidence score (0-1)
             4. State clear rationale for each decision
             
-            Only recommend trades with clear edge and proper risk/reward.""",
-            expected_output="""Final trading decisions in this format for each stock:
+            Only recommend trades with clear edge and proper risk/reward.
             
-            DECISION: [BUY/SELL/HOLD]
-            Symbol: [TICKER]
-            Quantity: [SHARES]
-            Entry: $[PRICE]
-            Stop Loss: $[PRICE]
-            Target: $[PRICE]
-            Confidence: [0-100]%
-            Rationale: [Brief explanation]
-            """,
+            Output ONLY valid JSON (no markdown).""",
+            expected_output="""Return ONLY valid JSON in this schema:
+            
+            {
+              "decisions": [
+                {
+                  "symbol": "AAPL",
+                  "action": "BUY|SELL|HOLD",
+                  "quantity": 100,
+                  "entry": 185.25,
+                  "stop_loss": 178.0,
+                  "target": 198.0,
+                  "confidence": 0.72,
+                  "rationale": "Brief explanation"
+                }
+              ]
+            }
+            
+            Do not include markdown or commentary outside the JSON.""",
             agent=self._agents["executive"],
             context=[technical_task, fundamental_task, risk_task],
         )
@@ -650,7 +660,148 @@ def run_trading_crew(
     try:
         crew = TradingCrew(symbols=symbols, budget=budget)
         result = crew.kickoff(on_step=callback)
-        return {"status": "success", "result": result}
+        return {"status": "success", "result": result, "decisions": parse_crew_decisions(result)}
     except Exception as e:
         logger.error(f"Trading crew failed: {e}")
         return {"status": "error", "error": str(e)}
+
+
+def parse_crew_decisions(output: str) -> list[dict[str, Any]]:
+    """Parse CrewAI output into structured decisions."""
+    if not output:
+        return []
+
+    payload = _load_json_payload(output)
+    if payload is not None:
+        decisions = _normalize_decisions(payload)
+        if decisions:
+            return decisions
+
+    return _parse_text_decisions(output)
+
+
+def _load_json_payload(output: str) -> Any | None:
+    """Best-effort JSON extraction from output."""
+    try:
+        return json.loads(output)
+    except Exception:
+        pass
+
+    for pattern in (r"\{.*\}", r"\[.*\]"):
+        match = re.search(pattern, output, flags=re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except Exception:
+                continue
+    return None
+
+
+def _normalize_decisions(payload: Any) -> list[dict[str, Any]]:
+    """Normalize decision payload into a list of decision dicts."""
+    if isinstance(payload, dict):
+        items = payload.get("decisions") or payload.get("trades") or [payload]
+    elif isinstance(payload, list):
+        items = payload
+    else:
+        return []
+
+    decisions: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        decision = _normalize_decision(item)
+        if decision.get("symbol"):
+            decisions.append(decision)
+    return decisions
+
+
+def _normalize_decision(raw: dict[str, Any]) -> dict[str, Any]:
+    """Normalize raw decision dict fields."""
+    symbol = str(raw.get("symbol") or raw.get("ticker") or "").upper().strip()
+    action = _normalize_action(raw.get("action") or raw.get("decision") or raw.get("signal"))
+    confidence = _parse_number(raw.get("confidence") or raw.get("confidence_pct") or raw.get("score"))
+    if confidence is None:
+        confidence = 0.5
+    elif confidence > 1:
+        confidence = min(confidence / 100, 1.0)
+
+    quantity = _parse_number(raw.get("quantity") or raw.get("qty") or raw.get("shares"))
+    entry = _parse_number(raw.get("entry") or raw.get("entry_price") or raw.get("price"))
+    stop_loss = _parse_number(raw.get("stop_loss") or raw.get("stop"))
+    target = _parse_number(raw.get("target") or raw.get("take_profit"))
+
+    return {
+        "symbol": symbol,
+        "action": action,
+        "quantity": int(quantity) if quantity is not None else 0,
+        "entry": entry,
+        "stop_loss": stop_loss,
+        "target": target,
+        "confidence": float(confidence),
+        "rationale": str(raw.get("rationale") or raw.get("reasoning") or ""),
+    }
+
+
+def _parse_text_decisions(output: str) -> list[dict[str, Any]]:
+    """Parse decisions from formatted text output."""
+    decisions: list[dict[str, Any]] = []
+    blocks = re.split(r"(?i)DECISION\s*:", output)
+    for block in blocks[1:]:
+        lines = [line.strip() for line in block.strip().splitlines() if line.strip()]
+        if not lines:
+            continue
+        action = _normalize_action(lines[0].split()[0])
+        symbol = _search_field(block, r"(?i)Symbol\s*:\s*([A-Z0-9.\-]+)") or ""
+        quantity = _parse_number(_search_field(block, r"(?i)Quantity\s*:\s*([0-9,.]+)"))
+        entry = _parse_number(_search_field(block, r"(?i)Entry\s*:\s*\$?([0-9,.]+)"))
+        stop_loss = _parse_number(_search_field(block, r"(?i)Stop\s*Loss\s*:\s*\$?([0-9,.]+)"))
+        target = _parse_number(_search_field(block, r"(?i)Target\s*:\s*\$?([0-9,.]+)"))
+        confidence = _parse_number(_search_field(block, r"(?i)Confidence\s*:\s*([0-9.]+)"))
+        if confidence is None:
+            confidence = 0.5
+        elif confidence > 1:
+            confidence = min(confidence / 100, 1.0)
+        rationale = _search_field(block, r"(?i)Rationale\s*:\s*(.*)") or ""
+
+        if symbol:
+            decisions.append({
+                "symbol": symbol.upper(),
+                "action": action,
+                "quantity": int(quantity) if quantity is not None else 0,
+                "entry": entry,
+                "stop_loss": stop_loss,
+                "target": target,
+                "confidence": float(confidence),
+                "rationale": rationale.strip(),
+            })
+    return decisions
+
+
+def _normalize_action(value: Any) -> str:
+    action = str(value or "").upper().strip()
+    if action not in {"BUY", "SELL", "HOLD"}:
+        return "HOLD"
+    return action
+
+
+def _parse_number(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    text = text.replace(",", "").replace("%", "").replace("$", "")
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _search_field(text: str, pattern: str) -> str | None:
+    match = re.search(pattern, text, flags=re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    return None
