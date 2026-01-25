@@ -300,11 +300,15 @@ def run_historical_backtest(
             return
 
         data["timestamp"] = pd.to_datetime(data["timestamp"])
+        if data["timestamp"].dt.tz is not None:
+            data["timestamp"] = data["timestamp"].dt.tz_localize(None)
         data = data.sort_values("timestamp").reset_index(drop=True)
 
         feature_builder = FeatureBuilder()
         features_df = feature_builder.build_features(data)
         features_df["timestamp"] = pd.to_datetime(features_df["timestamp"])
+        if features_df["timestamp"].dt.tz is not None:
+            features_df["timestamp"] = features_df["timestamp"].dt.tz_localize(None)
         features_df = features_df.sort_values("timestamp").reset_index(drop=True)
 
         train_mask = features_df["timestamp"] < split_date

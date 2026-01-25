@@ -74,6 +74,8 @@ class RiskGuardian(RuleBasedAgent[RiskGuardianOutput]):
         
         # If no decision or HOLD, auto-approve
         if decision is None or decision.action == Action.HOLD:
+            position_limit_used = abs(state.current_position_pct) / self.max_position_pct
+            daily_loss_limit_used = max(0, -state.daily_pnl / state.equity) / self.max_daily_loss_pct
             return RiskGuardianOutput(
                 approved=True,
                 veto_reasons=[],
@@ -83,8 +85,8 @@ class RiskGuardian(RuleBasedAgent[RiskGuardianOutput]):
                 post_trade_exposure=abs(state.current_position_pct),
                 daily_pnl=state.daily_pnl,
                 trades_today=state.trades_today,
-                position_limit_used=abs(state.current_position_pct) / self.max_position_pct,
-                daily_loss_limit_used=max(0, -state.daily_pnl / state.equity) / self.max_daily_loss_pct,
+                position_limit_used=min(position_limit_used, 1.0),
+                daily_loss_limit_used=min(daily_loss_limit_used, 1.0),
                 original_decision_id=decision.decision_id if decision else "none",
                 timestamp=datetime.now(),
             )
@@ -148,8 +150,8 @@ class RiskGuardian(RuleBasedAgent[RiskGuardianOutput]):
         approved = len(veto_reasons) == 0
 
         # Calculate metrics
-        position_limit_used = current_exposure / self.max_position_pct
-        daily_loss_limit_used = max(0, daily_loss_pct) / self.max_daily_loss_pct
+        position_limit_used = min(current_exposure / self.max_position_pct, 1.0)
+        daily_loss_limit_used = min(max(0, daily_loss_pct) / self.max_daily_loss_pct, 1.0)
 
         return RiskGuardianOutput(
             approved=approved,
