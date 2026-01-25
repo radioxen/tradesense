@@ -206,21 +206,20 @@ python test_technical_agent.py TSLA --days 300
 
 ---
 
-### 2. Scanner Agent ⚠️ BASIC
+### 2. Scanner Agent ✅ ENHANCED
 
-**File:** Integrated in `src/orchestrator/crewai_crew.py`
+**File:** `src/agents/researcher.py`
 
-**Status:** Functional but needs enhancement
+**Status:** Day-trading optimized scanner with Perplexity-driven universe discovery
 
 **Current Capabilities:**
-- Fetches stock data via yfinance
-- Searches news via Perplexity API
-- Basic momentum screening
+- Builds a 200-300 ticker universe (indices + Perplexity trending list)
+- Lightweight day-trading scores (gap, relative volume, volatility, RSI)
+- Perplexity catalyst detection with JSON parsing
 
 **Needs:**
-- Volume spike detection
-- Sector rotation analysis
 - Earnings calendar integration
+- Sector rotation analysis
 
 ---
 
