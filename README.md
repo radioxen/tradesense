@@ -4,8 +4,9 @@ A multi-agent AI trading system focused on day trading with real-time monitoring
 
 ## Features
 
-- **AI Agent Team**: Technical, Fundamental, and Executive agents work together
-- **Market Scanner**: Find momentum stocks using Perplexity AI for catalyst detection
+- **AI Agent Team**: Technical, Fundamental, Hybrid, Executive, and Risk Guardian
+- **Market Scanner**: Perplexity-driven discovery + day-trading momentum scoring
+- **Historical Backtesting**: 60/30 train-test split CLI flow
 - **Paper Trading**: Safe testing with Alpaca paper trading API
 - **Real-time Monitoring**: WebSocket-based live activity stream
 - **Editable Agents**: Customize agent roles, goals, and models from the UI
@@ -19,8 +20,9 @@ A multi-agent AI trading system focused on day trading with real-time monitoring
 ├─────────────────────────────────────────────────────────────┤
 │  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐   │
 │  │   Scanner   │────▶│   Agents    │────▶│   Broker    │   │
-│  │ (Perplexity)│     │ (Tech/Fund/ │     │  (Alpaca)   │   │
-│  └─────────────┘     │  Executive) │     └─────────────┘   │
+│  │ Perplexity │      │ Tech/Fund/  │     │  Alpaca     │   │
+│  └─────────────┘     │ Hybrid/Exec │     └─────────────┘   │
+│                      │ Risk        │                      │
 │                      └─────────────┘                        │
 ├─────────────────────────────────────────────────────────────┤
 │  ┌─────────────────────────────────────────────────────┐   │
@@ -81,17 +83,22 @@ cd api && uvicorn main:app --reload --port 8000
 cd webapp && npm install && npm run dev
 ```
 
+**Historical Backtest:**
+```bash
+python -m src.cli run-historical-backtest --symbol TSLA --interval 1h --train-days 60 --test-days 30
+```
+
 ## Trading Flow
 
 1. **Scan** - Click "Run Scanner" to find momentum stocks
-2. **Select** - Choose stocks from scan results
+2. **Select** - Choose 10-20 candidates from scan results
 3. **Analyze** - AI agents analyze each stock:
    - Technical: RSI, MACD, volume patterns
    - Fundamental: News, catalysts via Perplexity
-   - Executive: Final BUY/HOLD/SKIP decision
-4. **Execute** - Execute buy recommendations
+   - Hybrid + Executive: Final BUY/SELL/HOLD decision
+4. **Execute** - Execute approved recommendations
 5. **Monitor** - Hourly automated analysis of positions
-6. **Exit** - Auto take-profit at +5%, stop-loss at -3%
+6. **Exit** - Stop-loss/take-profit set per decision
 
 ## Agent Configuration
 
@@ -101,7 +108,7 @@ Each agent has:
 - **Name**: Display name
 - **Role**: What the agent does
 - **Goal**: What the agent optimizes for
-- **Model**: LLM model (gpt-4o, gpt-4o-mini)
+- **Model**: LLM model (gpt-5-mini-2025-08-07, gpt-5.2-2025-12-11)
 - **Temperature**: Creativity level (0-1)
 - **Enabled**: Whether to use this agent
 
@@ -122,11 +129,10 @@ Each agent has:
 ## Risk Management
 
 Built-in safeguards:
-- **Max Position Size**: 10% of portfolio per position
-- **Take Profit**: Auto-sell at +5% gain
-- **Stop Loss**: Auto-sell at -3% loss
-- **Min Confidence**: 65% required for trades
-- **Paper Trading Only**: Configured for Alpaca paper trading
+- **Max Position Size**: 15% per trade (exec) and 20% portfolio cap (risk guardian)
+- **Min Confidence**: 50% required for trades (default)
+- **Daily Loss Limits**: Enforced by Risk Guardian
+- **Stop/Target**: Set per decision and validated by Risk Guardian
 
 ## Project Structure
 

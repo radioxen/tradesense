@@ -158,6 +158,11 @@ Stock Trading/
 - [x] Backtest validation with fallback
 - [x] Test script for agent validation
 
+### Phase 3b: Scanner Enhancement
+- [x] Perplexity-driven universe discovery (200-300 tickers)
+- [x] Day-trading score (gap, relative volume, ATR, RSI, breakouts)
+- [x] Catalyst ranking with JSON parsing
+
 ### Phase 4: UI Development
 - [x] Dashboard with portfolio overview
 - [x] Command Center for workflow control
@@ -365,6 +370,12 @@ cd webapp && npm run dev
 
 ```bash
 python -m src.cli run-historical-backtest --symbol TSLA --interval 1h --train-days 60 --test-days 30
+```
+
+### Scanner (Day-Trading Discovery)
+
+```bash
+python -m src.cli scan-market --count 20
 ```
 
 ---
