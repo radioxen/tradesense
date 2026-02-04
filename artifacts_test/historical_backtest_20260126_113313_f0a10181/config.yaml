@@ -1,0 +1,14 @@
+symbol: AAPL
+interval: 1d
+train_days: 30
+test_days: 10
+start_date: '2024-01-21T00:00:00'
+end_date: '2024-03-01T00:00:00'
+split_date: '2024-02-20T00:00:00'
+initial_capital: 100000.0
+slippage_bps: 5.0
+min_confidence: 0.5
+max_position_pct: 0.15
+model_dir: models/technical
+save_models: true
+skip_train: true

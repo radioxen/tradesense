@@ -1,6 +1,7 @@
 """CLI entry point for AI Trading System."""
 
 import asyncio
+from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -54,6 +55,16 @@ def run_backtest(
         "--output", "-o",
         help="Output directory for results",
     ),
+    save_artifacts: bool = typer.Option(
+        True,
+        "--save-artifacts/--no-save-artifacts",
+        help="Save run artifacts under the artifacts directory",
+    ),
+    artifacts_dir: str = typer.Option(
+        "./artifacts",
+        "--artifacts-dir",
+        help="Base directory for run artifacts",
+    ),
 ):
     """Run a backtest on historical data."""
     # Setup logging
@@ -82,12 +93,15 @@ def run_backtest(
 
     # Run backtest
     async def _run():
+        import pandas as pd
+
         from src.data.market_data import get_provider
         from src.data.feature_store import FeatureStore
         from src.backtest.engine import BacktestConfig, BacktestEngine
         from src.orchestrator.contracts import (
             Action, ExecutiveDecision, OrderType, PipelineState
         )
+        from src.observability import ArtifactStore, BacktestReporter
 
         # Load config
         settings = get_settings(config)
@@ -176,6 +190,48 @@ def run_backtest(
 
         console.print(table)
 
+        if save_artifacts:
+            store = ArtifactStore(Path(artifacts_dir))
+            config_snapshot = {
+                "config_file": config,
+                "symbol": symbol,
+                "start_date": start.isoformat(),
+                "end_date": end.isoformat(),
+                "interval": interval,
+                "initial_capital": backtest_config.initial_capital,
+                "slippage_bps": backtest_config.slippage_bps,
+            }
+            run_paths = store.create_run(
+                "backtest",
+                metadata={"symbol": symbol, "interval": interval},
+            )
+            store.write_yaml(config_snapshot, run_paths.root / "config.yaml")
+            store.write_dataframe(data, run_paths.data_dir / "ohlcv")
+            store.write_dataframe(features, run_paths.features_dir / "features")
+            store.write_dataframe(results["equity_curve"], run_paths.results_dir / "equity_curve")
+            store.write_json(metrics, run_paths.results_dir / "metrics.json")
+
+            if results["decisions"]:
+                store.write_jsonl(results["decisions"], run_paths.agents_dir / "decisions.jsonl")
+
+            trade_rows = [asdict(trade) for trade in results["trades"]]
+            if trade_rows:
+                store.write_dataframe(
+                    pd.DataFrame(trade_rows),
+                    run_paths.trades_dir / "trades",
+                )
+
+            reporter = BacktestReporter(run_paths.reports_dir)
+            reporter.generate_markdown_report(
+                config_snapshot,
+                metrics,
+                results["trades"],
+                results["equity_curve"],
+                results["decisions"],
+            )
+
+            console.print(f"\nArtifacts saved to: {run_paths.root}")
+
         # Save results if output dir specified
         if output_dir:
             out_path = Path(output_dir)
@@ -256,6 +312,16 @@ def run_historical_backtest(
         "--output", "-o",
         help="Output directory for results",
     ),
+    save_artifacts: bool = typer.Option(
+        True,
+        "--save-artifacts/--no-save-artifacts",
+        help="Save run artifacts under the artifacts directory",
+    ),
+    artifacts_dir: str = typer.Option(
+        "./artifacts",
+        "--artifacts-dir",
+        help="Base directory for run artifacts",
+    ),
 ):
     """Run the 60/30 historical backtesting flow."""
     setup_logging(level="INFO")
@@ -291,6 +357,7 @@ def run_historical_backtest(
         from src.data.market_data import get_provider
         from src.orchestrator.crew import SimpleOrchestrator
         from src.orchestrator.contracts import PipelineState
+        from src.observability import ArtifactStore, BacktestReporter
 
         provider = get_provider("yfinance")
         data = await provider.fetch_ohlcv(symbol, start, end, interval)
@@ -384,6 +451,59 @@ def run_historical_backtest(
         table.add_row("Final Equity", f"${metrics['final_equity']:,.2f}")
 
         console.print(table)
+
+        if save_artifacts:
+            store = ArtifactStore(Path(artifacts_dir))
+            config_snapshot = {
+                "symbol": symbol,
+                "interval": interval,
+                "train_days": train_days,
+                "test_days": test_days,
+                "start_date": start.isoformat(),
+                "end_date": end.isoformat(),
+                "split_date": split_date.isoformat(),
+                "initial_capital": initial_capital,
+                "slippage_bps": slippage_bps,
+                "min_confidence": min_confidence,
+                "max_position_pct": max_position_pct,
+                "model_dir": str(model_path) if model_path else None,
+                "save_models": save_models,
+                "skip_train": skip_train,
+            }
+            run_paths = store.create_run(
+                "historical_backtest",
+                metadata={"symbol": symbol, "interval": interval},
+            )
+            store.write_yaml(config_snapshot, run_paths.root / "config.yaml")
+
+            store.write_dataframe(data, run_paths.data_dir / "ohlcv")
+            store.write_dataframe(test_data, run_paths.data_dir / "test_ohlcv")
+            store.write_dataframe(features_df, run_paths.features_dir / "features")
+            store.write_dataframe(train_features, run_paths.features_dir / "train_features")
+            store.write_dataframe(test_features, run_paths.features_dir / "test_features")
+            store.write_dataframe(results["equity_curve"], run_paths.results_dir / "equity_curve")
+            store.write_json(metrics, run_paths.results_dir / "metrics.json")
+
+            if results["decisions"]:
+                store.write_jsonl(results["decisions"], run_paths.agents_dir / "decisions.jsonl")
+
+            trade_rows = [asdict(trade) for trade in results["trades"]]
+            if trade_rows:
+                store.write_dataframe(
+                    pd.DataFrame(trade_rows),
+                    run_paths.trades_dir / "trades",
+                )
+
+            reporter = BacktestReporter(run_paths.reports_dir)
+            reporter.generate_markdown_report(
+                config_snapshot,
+                metrics,
+                results["trades"],
+                results["equity_curve"],
+                results["decisions"],
+            )
+
+            console.print(f"\nArtifacts saved to: {run_paths.root}")
 
         if output_dir:
             out_path = Path(output_dir)
