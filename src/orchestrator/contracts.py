@@ -6,7 +6,7 @@ to ensure strict validation and type safety.
 
 from datetime import datetime
 from enum import Enum
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, ConfigDict
 
